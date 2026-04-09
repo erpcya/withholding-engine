@@ -28,6 +28,12 @@ jobs:
           java-version: 8
           architecture: x64
 
+      - name: Refresh Dependencies
+        uses: gradle/gradle-build-action@v2
+        with:
+          gradle-version: 7.6
+          arguments: refreshDependences
+
       - name: Build with Gradle
         uses: gradle/gradle-build-action@v2
         with:

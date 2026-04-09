@@ -25,7 +25,7 @@ jobs:
         uses: gradle/gradle-build-action@v2
         with:
           gradle-version: 7.6
-          arguments: publish
+          arguments: refreshDependences publish
         env:
           ORG_GRADLE_PROJECT_deployVersion: ${{ github.event.release.tag_name }}
           GITHUB_DEPLOY_USER: ${{ github.actor }}
@@ -50,6 +50,6 @@ jobs:
         uses: gradle/gradle-build-action@v2
         with:
           gradle-version: 7.6
-          arguments: publishToMavenLocal
+          arguments: refreshDependences publishToMavenLocal
         env:
           ORG_GRADLE_PROJECT_deployVersion: ${{ github.event.release.tag_name }}
