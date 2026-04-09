@@ -1,11 +1,23 @@
+buildscript {
+	repositories {
+		mavenCentral()
+	}
+	dependencies {
+		classpath 'de.undercouch:gradle-download-task:4.1.1'
+	}
+}
+
 plugins {
 	id 'java-library'
 	id 'maven-publish'
 	id 'signing'
 }
 
-sourceCompatibility = 1.11
+apply plugin: 'de.undercouch.download'
+
+sourceCompatibility = 1.8
 def baseVersion = '3.9.4'
+def adempiereRelease = '3.9.3-rs-4.3'
 def baseGroupId = 'io.github.adempiere'
 
 repositories {
@@ -17,8 +29,8 @@ allprojects {
     tasks.withType(Javadoc).all { enabled = false }
 }
 
-sourceCompatibility = 1.11
-targetCompatibility = 1.11
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
 
 dependencies {
    api fileTree(
@@ -27,8 +39,13 @@ dependencies {
             '*.jar'
         ]
     )
-    //	ADempiere Core
-	api "${baseGroupId}:base:${baseVersion}"
+    api fileTree(
+        dir: 'dependences',
+        include: [
+            '*.jar'
+        ]
+    )
+    api files('dependences/classes')
 }
 
 sourceSets {
@@ -57,15 +74,61 @@ jar {
     }
 }
 
+task refreshDependences(){
+	file('dependences').mkdirs()
+	file('dependences/tmp/').mkdirs()
+	file('dependences/webuiClass').mkdirs()
+	doLast {
+		download {
+            src 'http://github.com/erpcya/adempiere/releases/download/' + adempiereRelease + '/Adempiere_393LTS.tar.gz'
+            dest 'dependences/tmp/Adempiere_393LTS.tar.gz'
+            overwrite false
+        }
+        
+        copy {
+            from tarTree(resources.gzip('dependences/tmp/Adempiere_393LTS.tar.gz'))
+            into 'dependences/tmp'
+        }
+        
+        copy {
+            from zipTree('dependences/tmp/Adempiere/lib/webui.war')
+            into 'dependences/webuiClass/'
+        }
+        
+        copy {
+        	from "dependences/tmp/Adempiere/lib"
+        	into "dependences"
+        	include "*.jar"
+    	}
+    	copy {
+        	from fileTree('dependences/tmp/Adempiere/packages/').filter { it.isFile()}
+        	into "dependences"
+        	include "*.jar"
+    	}
+    	copy {
+        	from "dependences/webuiClass/WEB-INF/lib"
+        	into "dependences"
+        	include "*.jar"
+    	}
+    	copy {
+	        from "dependences/webuiClass/WEB-INF/classes"
+	        into "dependences/classes"
+    	}
+    	file('dependences/tmp/').deleteDir()
+    	file('dependences/webuiClass/').deleteDir()
+	}
+}
+
 publishing {
     repositories {
 		mavenLocal()
 
         maven {
-            url = findProperty("deployPublishUrl") ?: System.properties['deploy.publish_url']
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/erpcya/withholding-engine")
             credentials {
-                username = findProperty("deployUsername") ?: System.properties['deploy.user']
-                password = findProperty("deployPassword") ?: System.properties['deploy.token']
+                username = System.properties['deploy.user'] ?: System.getenv("GITHUB_DEPLOY_USER")
+                password = System.properties['deploy.token'] ?: System.getenv("GITHUB_DEPLOY_TOKEN")
             }
         }
     }
@@ -114,8 +177,6 @@ signing {
 	sign configurations.archives
 
 	setRequired {
-		// signing is required if this is a release version and the artifacts are to be published
-		// do not use hasTask() as this require realization of the tasks that maybe are not necessary
 		(isReleaseVersion || version.toString().equals("build")) && gradle.taskGraph.allTasks.any {
 			it.equals(PublishToMavenRepository)
 		}
