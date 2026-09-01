@@ -53,21 +53,41 @@ jobs:
 
       - name: Find the previous release tag
         id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # The tag before this one. Without it there is no range to evaluate, and
-          # a first release has nothing to compare against — which is not a failure.
+          # The release before this one. Without it there is no range to evaluate,
+          # and a first release has nothing to compare against — which is not a
+          # failure.
           #
-          # Two filters, both learned the hard way. Repositories accumulate tags that
+          # Asked of the releases rather than of the tags. Two failures made the
+          # earlier version filter tags by hand: repositories accumulate tags that
           # are not releases — `rs-2.1`, `RC-1.3.7`, a branch snapshot — and under
           # `-v:refname` a leading letter outranks every digit, so the newest release
-          # loses to something tagged years ago. And a tag that exists is not
-          # necessarily behind this one: `--merged` keeps the range to ancestors, so
-          # a parallel maintenance line cannot be read as this release's predecessor.
-          # Both failures produce a plausible range and a confident verdict about a
+          # lost to something tagged years ago. The filter that fixed both required a
+          # tag to be numeric, which is a guess about how somebody names a release
+          # and it was wrong: `adempiere-3.9.4-1.3.6` matched nothing, so a
+          # repository whose every tag names its base version would never have its
+          # contract regenerated, silently, for ever.
+          #
+          # A release is a thing GitHub knows about. Ordered by when it was
+          # published, so no ordering is inferred from a name, and drafts are not
+          # releases.
+          #
+          # `--is-ancestor` stays: a release that exists is not necessarily behind
+          # this one, and a parallel maintenance line read as this release's
+          # predecessor produces a plausible range and a confident verdict about a
           # diff nobody shipped.
           tag='${{ github.event.release.tag_name }}'
-          previous=$(git tag --sort=-v:refname --merged "$tag^" \
-                     | grep -E '^v?[0-9]+(\.[0-9]+)+$' | grep -v "^$tag$" | head -1)
+          previous=""
+          for candidate in $(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+                             --paginate -q '.[] | select(.draft | not) | .tag_name'); do
+            [ "$candidate" = "$tag" ] && continue
+            git rev-parse -q --verify "refs/tags/$candidate" >/dev/null || continue
+            if git merge-base --is-ancestor "$candidate" "$tag^" 2>/dev/null; then
+              previous="$candidate"; break
+            fi
+          done
           if [ -z "$previous" ]; then
             echo "No earlier tag. Nothing to compare this release against."
             echo "skip=true" >> "$GITHUB_OUTPUT"
