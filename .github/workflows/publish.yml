@@ -62,7 +62,9 @@ jobs:
         run: ./gradlew publish
         env:
           ORG_GRADLE_PROJECT_deployVersion: ${{ github.event.release.tag_name }}
-          ORG_GRADLE_PROJECT_deployPublishUrl: ${{ secrets.DEPLOY_PUBLISH_GITHUB_URL }}
+          #  This repository's own packages when the secret is unset, which is the
+          #  ordinary case for a fork that publishes for itself.
+          ORG_GRADLE_PROJECT_deployPublishUrl: ${{ secrets.DEPLOY_PUBLISH_GITHUB_URL || 'https://maven.pkg.github.com/erpcya/withholding-engine' }}
           ORG_GRADLE_PROJECT_deploySigningKey: ${{ secrets.PGP_SECRET }}
           ORG_GRADLE_PROJECT_deploySigningPassword: ${{ secrets.PGP_PASSPHRASE }}
           ORG_GRADLE_PROJECT_deployUsername: "${{ github.actor }}"

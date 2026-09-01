@@ -68,13 +68,12 @@ publishing {
 		mavenLocal()
 
         maven {
-            //  This fork publishes its own artifact, to its own packages. The
-            //  property still overrides it — a different registry, a local run —
-            //  but a publish with nothing configured goes somewhere correct
-            //  instead of failing on an unset URL.
-            url = findProperty("deployPublishUrl")
-                    ?: System.properties['deploy.publish_url']
-                    ?: "https://maven.pkg.github.com/erpcya/withholding-engine"
+            //  No default here on purpose. A fallback in the build script applies
+            //  to every publishing job alike, and the Sonatype job's URL secret is
+            //  unset — so it published to GitHub Packages with Sonatype credentials
+            //  and failed with a 401 that described neither problem. Each job says
+            //  where it publishes; where it says nothing, it stops.
+            url = findProperty("deployPublishUrl") ?: System.properties['deploy.publish_url']
             credentials {
                 username = findProperty("deployUsername") ?: System.properties['deploy.user']
                 password = findProperty("deployPassword") ?: System.properties['deploy.token']
