@@ -62,7 +62,13 @@ publishing {
 		mavenLocal()
 
         maven {
-            url = findProperty("deployPublishUrl") ?: System.properties['deploy.publish_url']
+            //  This fork publishes its own artifact, to its own packages. The
+            //  property still overrides it — a different registry, a local run —
+            //  but a publish with nothing configured goes somewhere correct
+            //  instead of failing on an unset URL.
+            url = findProperty("deployPublishUrl")
+                    ?: System.properties['deploy.publish_url']
+                    ?: "https://maven.pkg.github.com/erpcya/withholding-engine"
             credentials {
                 username = findProperty("deployUsername") ?: System.properties['deploy.user']
                 password = findProperty("deployPassword") ?: System.properties['deploy.token']
@@ -92,10 +98,13 @@ publishing {
                         email = 'ysenih@erpya.com'
                     }
                 }
+                //  The fork, not upstream. Whoever follows this from a published
+                //  artifact is looking for the source that produced it, and
+                //  upstream does not contain it.
                 scm {
-                    connection = 'scm:git:git://github.com/adempiere/withholding-engine.git'
-                    developerConnection = 'scm:git:ssh://github.com/adempiere/withholding-engine.git'
-                    url = 'http://github.com/adempiere/withholding-engine'
+                    connection = 'scm:git:git://github.com/erpcya/withholding-engine.git'
+                    developerConnection = 'scm:git:ssh://github.com/erpcya/withholding-engine.git'
+                    url = 'https://github.com/erpcya/withholding-engine'
                 }
             }
 		}
