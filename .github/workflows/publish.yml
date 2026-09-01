@@ -74,8 +74,15 @@ jobs:
           ORG_GRADLE_PROJECT_deploySigningKey: ${{ secrets.PGP_SECRET }}
           ORG_GRADLE_PROJECT_deploySigningPassword: ${{ secrets.PGP_PASSPHRASE }}
           ORG_GRADLE_PROJECT_deployUsername: "${{ github.actor }}"
-          #  The run's own token when none is configured. Publishing to this
-          #  repository's own packages needs nothing else, which is how the 3.9.3
-          #  line published for a year — and a workflow that only works once
-          #  somebody sets a secret fails on the day nobody remembers it was needed.
-          ORG_GRADLE_PROJECT_deployPassword: "${{ secrets.DEPLOY_TOKEN || secrets.GITHUB_TOKEN }}"
+          #  The run's own token, not a configured one. This job publishes to this
+          #  repository's own packages, and the run's token is scoped to exactly
+          #  that — least privilege, and nothing to set or rotate. It is how the
+          #  3.9.3 line published for a year.
+          #
+          #  Preferring DEPLOY_TOKEN when it exists was the wrong way round: an
+          #  organization token that is valid for something else, or unauthorised
+          #  for this organization under SSO, then wins over a token that would
+          #  have worked — and fails with a 401 that says nothing about which of
+          #  the two was used. A repository publishing elsewhere names that
+          #  registry and supplies its own credential, as the Sonatype job does.
+          ORG_GRADLE_PROJECT_deployPassword: "${{ secrets.GITHUB_TOKEN }}"
