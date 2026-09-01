@@ -43,6 +43,12 @@ jobs:
   publish-github:
     name: Publish Project (Github)
     runs-on: ubuntu-latest
+    #  Without this the run's own token cannot write a package, and neither can any
+    #  other: the default permissions of a workflow are read-only, and a publish
+    #  fails with a 401 that reads as a bad credential rather than a missing grant.
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
@@ -68,4 +74,8 @@ jobs:
           ORG_GRADLE_PROJECT_deploySigningKey: ${{ secrets.PGP_SECRET }}
           ORG_GRADLE_PROJECT_deploySigningPassword: ${{ secrets.PGP_PASSPHRASE }}
           ORG_GRADLE_PROJECT_deployUsername: "${{ github.actor }}"
-          ORG_GRADLE_PROJECT_deployPassword: "${{ secrets.DEPLOY_TOKEN }}"
+          #  The run's own token when none is configured. Publishing to this
+          #  repository's own packages needs nothing else, which is how the 3.9.3
+          #  line published for a year — and a workflow that only works once
+          #  somebody sets a secret fails on the day nobody remembers it was needed.
+          ORG_GRADLE_PROJECT_deployPassword: "${{ secrets.DEPLOY_TOKEN || secrets.GITHUB_TOKEN }}"
