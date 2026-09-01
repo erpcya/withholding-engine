@@ -79,6 +79,25 @@ jobs:
           # predecessor produces a plausible range and a confident verdict about a
           # diff nobody shipped.
           tag='${{ github.event.release.tag_name }}'
+
+          # Only the line this platform tracks, which is the repository's default
+          # branch. A contract describes one line of development; a release cut from
+          # a maintenance branch describes a different one, and regenerating the
+          # contract from it would replace what the current line says with what an
+          # older line still does.
+          #
+          # The default branch rather than a name written here: a fork keeps
+          # upstream's branch untouched and makes its own the default, and that
+          # choice is already recorded where GitHub can be asked for it.
+          line=$(gh api "repos/$GITHUB_REPOSITORY" -q .default_branch)
+          if ! git merge-base --is-ancestor "$tag" "origin/$line" 2>/dev/null; then
+            echo "$tag is not on $line, which is the line this platform tracks."
+            echo "Nothing regenerated: a contract describes one line, and this"
+            echo "release belongs to another."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           previous=""
           for candidate in $(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
                              --paginate -q '.[] | select(.draft | not) | .tag_name'); do
