@@ -108,8 +108,19 @@ jobs:
             fi
           done
           if [ -z "$previous" ]; then
-            echo "No earlier tag. Nothing to compare this release against."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
+            # Asked anyway, with an empty range. A repository with no contract yet
+            # gets its first one written — the service checks that before it looks
+            # at any range — and this step used to decide not to ask, so a first
+            # release on a line produced nothing at all and said "nothing to
+            # compare" as though that were the whole answer.
+            #
+            # Where a contract does exist, the empty range is a no-op the service
+            # reports as such. The judgement belongs there: it holds the contract
+            # and this step does not.
+            echo "No earlier release on this line. Asking anyway: a repository"
+            echo "without a contract gets its first one, and one that has a"
+            echo "contract already will find the range empty."
+            echo "previous=$tag" >> "$GITHUB_OUTPUT"
           else
             echo "Evaluating $previous..${{ github.event.release.tag_name }}"
             echo "previous=$previous" >> "$GITHUB_OUTPUT"
