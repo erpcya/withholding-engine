@@ -21,11 +21,11 @@ upstream: https://github.com/adempiere/withholding-engine
 # Domain nouns, not class names and not this repository's own name.
 terms:
   - retención
-  - IVA
-  - ISLR
   - comprobante de retención
-  - impuesto
-
+  - agente de retención
+  - declaración de retención
+  - ISLR
+  - sustraendo
 # How this is built comes from standards/build-profiles.yml, matched by the
 # gradle wrapper in this tree. Nothing to declare unless this repository differs.
 
