@@ -163,7 +163,7 @@ jobs:
           # which a guessed `1.4.7-rc1` does not: nobody has to decide the next
           # release number at the moment a candidate is cut.
           GITHUB_DEPLOY_USER: ${{ github.actor }}
-          GITHUB_DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+          GITHUB_DEPLOY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # The same two credentials again, as Gradle project properties, because the
           # repositories do not agree on how their publishing block reads them. Most
           # read the environment; `withholding-engine` reads
@@ -178,7 +178,7 @@ jobs:
           # property. Repositories reading the environment are unaffected: they never
           # look these up.
           ORG_GRADLE_PROJECT_deployUsername: ${{ github.actor }}
-          ORG_GRADLE_PROJECT_deployPassword: ${{ secrets.DEPLOY_TOKEN }}
+          ORG_GRADLE_PROJECT_deployPassword: ${{ secrets.GITHUB_TOKEN }}
           ORG_GRADLE_PROJECT_deployPublishUrl: https://maven.pkg.github.com/${{ github.repository }}
           SHA: ${{ steps.tree.outputs.sha }}
           NUMBER: ${{ github.event.pull_request.number }}
