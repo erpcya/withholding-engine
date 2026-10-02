@@ -144,22 +144,33 @@ public class WithholdingSend extends WithholdingSendAbstract {
         File attachment = getPDF(invoice);
     	if (attachment == null)
 			return;
+
+		if (recipient.get() == null) {
+			addLog("@NotFound@ @AD_User_ID@ -> @C_BPartner_ID@ " + invoice.getC_BPartner().getName() + " @DocumentNo@ " + invoice.getDocumentNo());
+			return;
+		}
+
+		List<String> validEmailAddresses = new ArrayList<>();
+		for (String emailAddress : splitEmailAddresses(recipient.get().getEMail())) {
+			if (isValidEmailAddress(emailAddress)) {
+				validEmailAddresses.add(emailAddress);
+			} else {
+				addLog("@Invalid@ @EMail@ " + emailAddress + " -> @C_BPartner_ID@ " + invoice.getC_BPartner().getName()
+						+ " @DocumentNo@ " + invoice.getDocumentNo());
+			}
+		}
+		if (validEmailAddresses.isEmpty())
+			return;
     	
         if (!sendToQueue) {
-	        //	
-	        Optional.ofNullable(recipient.get()).ifPresent(toUser -> {
-	    		//	
-	        	MClient client = MClient.get(getCtx(), getAD_Client_ID());
-	        	MMailText template = getTemplate(invoice, mailTextId);
-				if (client.sendEMail(sender, recipient.get(), template.getMailHeader(), template.getMailText(true), attachment,template.isHtml())) { 
-					addLog("@EMail@ @Sent@ @to@ " + recipient.get().getName());
+			MClient client = MClient.get(getCtx(), getAD_Client_ID());
+			MMailText template = getTemplate(invoice, mailTextId);
+			validEmailAddresses.forEach(emailAddress -> {
+				if (client.sendEMail(emailAddress, template.getMailHeader(), template.getMailText(true), attachment, template.isHtml())) {
+					addLog("@EMail@ @Sent@ @to@ " + emailAddress);
 					sends.incrementAndGet();
 				}
-	        });
-	        //	Other
-	        if(!Optional.ofNullable(recipient.get()).isPresent()) {
-	        	addLog("@NotFound@ @AD_User_ID@ -> @C_BPartner_ID@ " + invoice.getC_BPartner().getName() + " @DocumentNo@ " + invoice.getDocumentNo());
-	        }
+			});
         }else {
 			MMailText template = getTemplate(invoice, mailTextId);
 			//	Get instance for notifier
@@ -175,12 +186,7 @@ public class WithholdingSend extends WithholdingSendAbstract {
 				.withDescription(template.getMailHeader())
 				.withEntity(invoice);
 			
-			if (recipient.get() != null) 
-				notifier.addRecipient(recipient.get().getAD_User_ID());
-			else {
-				addLog(invoice.getC_Invoice_ID(), null, null, "@RequestActionEMailNoTo@");
-				return;
-			}
+			validEmailAddresses.forEach(notifier::addRecipient);
 			//	Attachment
 			notifier.addAttachment(attachment);
 			//	Add to queue
@@ -189,6 +195,31 @@ public class WithholdingSend extends WithholdingSendAbstract {
 			//	
 			sends.incrementAndGet();
         }
+	}
+
+	/**
+	 * Split comma-separated email addresses
+	 * @param emailAddresses
+	 * @return trimmed email addresses
+	 */
+	private List<String> splitEmailAddresses(String emailAddresses) {
+		if (emailAddresses == null)
+			return Arrays.asList("");
+		return Arrays.asList(emailAddresses.split(",", -1)).stream()
+				.map(String::trim)
+				.toList();
+	}
+
+	/**
+	 * Validate email address format
+	 * @param emailAddress
+	 * @return true when the address has one at sign and non-empty local and domain parts
+	 */
+	private boolean isValidEmailAddress(String emailAddress) {
+		int atIndex = emailAddress.indexOf('@');
+		return atIndex > 0
+				&& atIndex == emailAddress.lastIndexOf('@')
+				&& atIndex < emailAddress.length() - 1;
 	}
 	
 	/**
