@@ -24,6 +24,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.adempiere.exceptions.AdempiereException;
 import org.compiere.model.MConversionRate;
+import org.compiere.model.MConversionType;
 import org.compiere.model.MCurrency;
 import org.compiere.model.MInvoice;
 import org.compiere.model.MInvoiceLine;
@@ -165,14 +166,12 @@ public class WithholdingGenerate extends WithholdingGenerateAbstract {
 		AtomicReference<Integer> Curr_WH_Setting_ID = new AtomicReference<Integer>();
 		AtomicReference<Integer> Curr_C_BPartner_ID = new AtomicReference<Integer>();
 		AtomicReference<Integer> Curr_C_DocType_ID = new AtomicReference<Integer>();
-		AtomicReference<Integer> Curr_C_ConversionType_ID = new AtomicReference<Integer>();
 		
 		if (withholding.get_ID() > 0 ) {
 			Curr_WH_Definition_ID.set(withholding.getWH_Definition_ID());
 			Curr_WH_Setting_ID.set(withholding.getWH_Setting_ID());
 			Curr_C_BPartner_ID.set(withholding.getC_BPartner_ID());
 			Curr_C_DocType_ID.set(withholding.getWHDocType());
-			Curr_C_ConversionType_ID.set(withholding.getC_ConversionType_ID());
 			invoiceTo.set(Optional.empty());
 			invoiceLineTo.set(Optional.empty());
 			MWHDefinition whDefinition = (MWHDefinition)withholding.getWH_Definition();
@@ -183,18 +182,17 @@ public class WithholdingGenerate extends WithholdingGenerateAbstract {
 			withholldingDoc = withholdingDocList.stream()
 								.filter(wh ->(wh.getC_BPartner_ID()==Curr_C_BPartner_ID.get()
 												&& wh.getWH_Definition_ID()==Curr_WH_Definition_ID.get() 
-													&& wh.getWH_Setting_ID() == Curr_WH_Setting_ID.get())
-														&& wh.getC_DocType_ID() == Curr_C_DocType_ID.get()
-															&& wh.getC_ConversionType_ID() == Curr_C_ConversionType_ID.get())
+								&& wh.getWH_Setting_ID() == Curr_WH_Setting_ID.get())
+										&& wh.getC_DocType_ID() == Curr_C_DocType_ID.get())
 								.findFirst();
 
 			if (!withholldingDoc.isPresent()) 
 				withholldingDoc = Optional.ofNullable(new Withholding(withholding.getWH_Definition_ID(), 
 																		withholding.getWH_Setting_ID(), 
-																		withholding.getC_BPartner_ID(), 
-																		withholding.getWHDocType(), 
-																		withholding.getC_ConversionType_ID(), 
-																		this));
+															withholding.getC_BPartner_ID(),
+															withholding.getWHDocType(),
+															MConversionType.getDefault(withholding.getAD_Client_ID()),
+															this));
 			
 			withholldingDoc.ifPresent(whDocument->{
 				if (!whDocument.getInvoice().isPresent()) {
@@ -218,7 +216,7 @@ public class WithholdingGenerate extends WithholdingGenerateAbstract {
 						invoice.setIsSOTrx(withholding.isSOTrx());
 						invoice.setDateInvoiced(getDateDoc());
 						invoice.setDateAcct(getDateDoc());
-						invoice.setC_ConversionType_ID(withholding.getC_ConversionType_ID());
+						invoice.setC_ConversionType_ID(whDocument.getC_ConversionType_ID());
 						invoice.setM_PriceList_ID(invoiceFrom.getM_PriceList_ID());
 						Optional<MPriceList> maybePriceList = Optional
 																.ofNullable(MPriceList.getDefault(getCtx(), 
