@@ -1,0 +1,40 @@
+# Read by the ERP AI knowledge platform. Declarative, not authoritative: an agent
+# derives the classification from evidence and reports a disagreement with this
+# file as an UNKNOWN rather than resolving it. Section 1 of .ai/knowledge.md is
+# the home of this fact; this file serves an agent that has no contract yet.
+# Which product this repository is part of. Asked before the type,
+# because it decides whether this is a candidate at all: a question
+# about how ADempiere calculates average cost is not a question about
+# an edge agent written in Go. See standards/repository-marker-v1 §5.
+product: adempiere
+type: Library
+entityType: WHH
+owner: ERP Consultores y Asociados
+
+# Forked so this platform can live here: a marker, a workflow and a contract
+# cannot be added to a repository somebody else owns. Forking does not change
+# what this is — a forked Library is still a Library — but it changes what may
+# safely be done to it. See standards/repository-classification-v1.md.
+upstream: https://github.com/adempiere/withholding-engine
+
+# The words people use for this when they report something or ask a question.
+# Domain nouns, not class names and not this repository's own name.
+terms:
+  - retención
+  - comprobante de retención
+  - agente de retención
+  - declaración de retención
+  - ISLR
+  - sustraendo
+# How this is built comes from standards/build-profiles.yml, matched by the
+# gradle wrapper in this tree. Nothing to declare unless this repository differs.
+
+# What a merge publishes, and under what name. The tag is used verbatim as the
+# artifact's version by publish.yml, and GitHub Packages will not overwrite one,
+# so it is declared here rather than inferred. See organization/DR-0005 and
+# standards/repository-marker-v1 §9.
+release:
+  tag: "adempiere-3.9.4-{major}.{minor}.{patch}"
+  # The patch after which the next release rolls into the minor. A backstop, not
+  # a rhythm: a minor is asked for with `erp-ai:minor` on the pull request.
+  rolls_at: 99

@@ -4,7 +4,7 @@ plugins {
 	id 'signing'
 }
 
-sourceCompatibility = 1.11
+sourceCompatibility = 1.17
 def baseVersion = '3.9.4'
 def baseGroupId = 'io.github.adempiere'
 
@@ -17,8 +17,8 @@ allprojects {
     tasks.withType(Javadoc).all { enabled = false }
 }
 
-sourceCompatibility = 1.11
-targetCompatibility = 1.11
+sourceCompatibility = 1.17
+targetCompatibility = 1.17
 
 dependencies {
    api fileTree(
@@ -47,7 +47,13 @@ java {
 
 def entityType = 'WHH'
 group = "io.github.adempiere"
-version = findProperty("deployVersion") ?: "local-1.0.0"
+//  Both, and in that order. ORG_GRADLE_PROJECT_deployVersion is what publish.yml
+//  sets; ADEMPIERE_LIBRARY_VERSION is what the platform's release-candidate
+//  workflow sets, and it is what every other library here reads. A candidate built
+//  without this publishes local-1.0.0 and looks like it worked.
+version = findProperty("deployVersion")
+        ?: System.getenv("ADEMPIERE_LIBRARY_VERSION")
+        ?: "local-1.0.0"
 
 jar {
     manifest {
@@ -62,6 +68,11 @@ publishing {
 		mavenLocal()
 
         maven {
+            //  No default here on purpose. A fallback in the build script applies
+            //  to every publishing job alike, and the Sonatype job's URL secret is
+            //  unset — so it published to GitHub Packages with Sonatype credentials
+            //  and failed with a 401 that described neither problem. Each job says
+            //  where it publishes; where it says nothing, it stops.
             url = findProperty("deployPublishUrl") ?: System.properties['deploy.publish_url']
             credentials {
                 username = findProperty("deployUsername") ?: System.properties['deploy.user']
@@ -92,10 +103,13 @@ publishing {
                         email = 'ysenih@erpya.com'
                     }
                 }
+                //  The fork, not upstream. Whoever follows this from a published
+                //  artifact is looking for the source that produced it, and
+                //  upstream does not contain it.
                 scm {
-                    connection = 'scm:git:git://github.com/adempiere/withholding-engine.git'
-                    developerConnection = 'scm:git:ssh://github.com/adempiere/withholding-engine.git'
-                    url = 'http://github.com/adempiere/withholding-engine'
+                    connection = 'scm:git:git://github.com/erpcya/withholding-engine.git'
+                    developerConnection = 'scm:git:ssh://github.com/erpcya/withholding-engine.git'
+                    url = 'https://github.com/erpcya/withholding-engine'
                 }
             }
 		}

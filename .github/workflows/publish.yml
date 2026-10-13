@@ -20,19 +20,19 @@ jobs:
       - name: Check out the repo
         uses: actions/checkout@v4
 
-      - name: Set up Java JDK 11
+      - name: Set up Java JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-package: 'jdk'
-          java-version: 11
+          java-version: 17
           architecture: x64
 
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Build with Gradle
-        uses: gradle/gradle-build-action@v3
-        with:
-          gradle-version: 8.0.2
-          arguments: publish
+        run: ./gradlew publish
         env:
           ORG_GRADLE_PROJECT_deployVersion: ${{ github.event.release.tag_name }}
           ORG_GRADLE_PROJECT_deployPublishUrl: ${{ secrets.DEPLOY_PUBLISH_SONATYPE_URL }}
@@ -43,27 +43,95 @@ jobs:
   publish-github:
     name: Publish Project (Github)
     runs-on: ubuntu-latest
+    #  Without this the run's own token cannot write a package, and neither can any
+    #  other: the default permissions of a workflow are read-only, and a publish
+    #  fails with a 401 that reads as a bad credential rather than a missing grant.
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
 
-      - name: Set up Java JDK 11
+      - name: Set up Java JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-package: 'jdk'
-          java-version: 11
+          java-version: 17
           architecture: x64
 
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Build with Gradle
-        uses: gradle/gradle-build-action@v3
-        with:
-          gradle-version: 8.0.2
-          arguments: publish
+        run: ./gradlew publish
         env:
           ORG_GRADLE_PROJECT_deployVersion: ${{ github.event.release.tag_name }}
-          ORG_GRADLE_PROJECT_deployPublishUrl: ${{ secrets.DEPLOY_PUBLISH_GITHUB_URL }}
+          #  This repository's own packages when the secret is unset, which is the
+          #  ordinary case for a fork that publishes for itself.
+          ORG_GRADLE_PROJECT_deployPublishUrl: ${{ secrets.DEPLOY_PUBLISH_GITHUB_URL || 'https://maven.pkg.github.com/erpcya/withholding-engine' }}
           ORG_GRADLE_PROJECT_deploySigningKey: ${{ secrets.PGP_SECRET }}
           ORG_GRADLE_PROJECT_deploySigningPassword: ${{ secrets.PGP_PASSPHRASE }}
           ORG_GRADLE_PROJECT_deployUsername: "${{ github.actor }}"
-          ORG_GRADLE_PROJECT_deployPassword: "${{ secrets.DEPLOY_TOKEN }}"
+          #  The run's own token, not a configured one. This job publishes to this
+          #  repository's own packages, and the run's token is scoped to exactly
+          #  that — least privilege, and nothing to set or rotate. It is how the
+          #  3.9.3 line published for a year.
+          #
+          #  Preferring DEPLOY_TOKEN when it exists was the wrong way round: an
+          #  organization token that is valid for something else, or unauthorised
+          #  for this organization under SSO, then wins over a token that would
+          #  have worked — and fails with a 401 that says nothing about which of
+          #  the two was used. A repository publishing elsewhere names that
+          #  registry and supplies its own credential, as the Sonatype job does.
+          ORG_GRADLE_PROJECT_deployPassword: "${{ secrets.GITHUB_TOKEN }}"
+
+# Managed by Jarvis. Do not edit this block manually.
+  notify-jarvis-result:
+    name: Informar resultado de publicación a Jarvis
+    # Wait for every pre-existing job. Dependency delivery depends on the
+    # artifact being published to at least one registry, not every optional
+    # mirror being healthy.
+    if: ${{ always() && github.event_name == 'release' }}
+    needs: [publish-sonatype, publish-github]
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Enviar resultado real a Jarvis
+        env:
+          JARVIS_ACTION_RESULT_URL: "http://app-server-4.erpcya.com:3000/webhook/action-result"
+          JARVIS_RELEASE_TAG: "${{ github.event.release.tag_name }}"
+          JARVIS_NEEDS_JSON: '${{ toJSON(needs) }}'
+        run: |
+          JARVIS_STATUS=$(jq -r '
+            def results: [.[] | .result];
+            def publisher_results:
+              [to_entries[]
+                | select(.key | test("(^|[-_])(publish|deploy|upload)([-_]|$)"; "i"))
+                | .value.result];
+            def aggregate_status($items):
+              if ($items | length) == 0 then "skipped"
+              elif any($items[]; . == "success") then "success"
+              elif any($items[]; . == "failure") then "failure"
+              elif any($items[]; . == "cancelled") then "cancelled"
+              else "skipped"
+              end;
+            (publisher_results) as $publishers
+            | if ($publishers | length) > 0
+              then aggregate_status($publishers)
+              else aggregate_status(results)
+              end
+          ' <<< "$JARVIS_NEEDS_JSON")
+
+          payload=$(jq -nc \
+            --arg repo "${{ github.repository }}" \
+            --arg status "$JARVIS_STATUS" \
+            --arg tag "$JARVIS_RELEASE_TAG" \
+            --arg run_id "${{ github.run_id }}" \
+            '{repo: $repo, status: $status, tag: $tag, run_id: $run_id}')
+
+          curl --fail-with-body --retry 2 --retry-delay 2 \
+            -X POST "$JARVIS_ACTION_RESULT_URL" \
+            -H "Content-Type: application/json" \
+            --data "$payload"

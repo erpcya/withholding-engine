@@ -1,0 +1,446 @@
+# Copy this to .github/workflows/erp-ai-candidate.yml in a library repository whose
+# changes have to be tried by a person before anybody believes them.
+#
+#   erp-ai:candidate   build this pull request and publish it as a release candidate
+#   erp-ai:verified    somebody ran it and says it does what was asked
+#
+# Create both labels in this repository first.
+#
+# Why this exists: every verdict this platform reaches ends at *it compiles*. A
+# repository with no test suite cannot get further on its own, and the analysis says
+# so plainly each time. A candidate is how a person gets to answer the question the
+# platform cannot — and the comment it leaves carries what to check, taken from the
+# analysis rather than invented afterwards.
+#
+# The label removes itself once the build starts. That makes it an instruction —
+# *build one now* — rather than a state, which matters after a rework: the commit
+# changed, so the previous candidate is stale, and a single click asks for a new one.
+# Rebuilding silently on every push would replace the jar underneath a functional
+# consultant in the middle of testing.
+
+name: ERP AI release candidate
+
+on:
+  pull_request_target:
+    # `closed` as well as `labeled`, because a merge is the other thing that
+    # happens to a pull request and this platform has to hear about it. The label
+    # jobs stay unaffected: on a `closed` event `github.event.label` does not
+    # exist, so every `github.event.label.name ==` below is false.
+    types: [labeled, closed]
+
+jobs:
+  candidate:
+    if: github.event.label.name == 'erp-ai:candidate'
+    runs-on: ubuntu-latest
+    permissions:
+      # `write` because of the merge below. It was `read`, which was enough while a
+      # candidate was built from wherever the branch happened to be.
+      contents: write
+      packages: write
+      pull-requests: write
+    steps:
+      # A branch is a snapshot of the base at the moment it was cut, and it does not
+      # follow it afterwards. payment-customizations#2 was cut on 28 August and its
+      # candidate built from that day's tree; by mid-September the base had moved
+      # nineteen commits and four releases, so installing that candidate meant
+      # running the change against an ERP missing all of them — and if it misbehaved,
+      # nothing said whether the change or the gap was at fault.
+      #
+      # So the base comes in first. A candidate is then "this change on what it will
+      # land on", which is what anybody installing one assumes it already was.
+      #
+      # It also makes the version honest. `pr<number>-<sha7>` is the same string
+      # while the branch does not move, so re-labelling after the base advanced
+      # republished a version that already existed; now the tree is different and so
+      # is the name.
+      - name: Bring the branch up to date with what it will land on
+        id: tree
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          API: ${{ github.api_url }}
+        run: |
+          set -euo pipefail
+          body=$(jq -n --arg b "$BRANCH" --arg h "$BASE" \
+            '{base: $b, head: $h,
+              commit_message: ("merge " + $h + " into " + $b +
+                               ", so the candidate is built on what it lands on")}')
+          code=$(curl -sS -o merge.json -w '%{http_code}' -X POST \
+            -H "authorization: Bearer $GH_TOKEN" \
+            -H 'accept: application/vnd.github+json' \
+            "$API/repos/$REPO/merges" -d "$body")
+          case "$code" in
+            201) sha=$(jq -r .sha merge.json)
+                 echo "merged $BASE into $BRANCH" ;;
+            204) sha="$SHA"
+                 echo "$BRANCH already carries $BASE" ;;
+            409) echo "::error::$BASE cannot be merged into $BRANCH without resolving a conflict. The candidate would be built on a tree this change will never land on. Resolve it on the branch and label again."
+                 exit 1 ;;
+            *)   cat merge.json; exit 1 ;;
+          esac
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          rm -f merge.json
+
+      # The head of the pull request, by SHA — the one the step above settled.
+      # `pull_request_target` checks out the base by default, which would publish a
+      # candidate of the wrong code under a version naming the pull request: a lie
+      # that compiles.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tree.outputs.sha }}
+
+      - name: Take the label off, so it can be applied again
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          API: ${{ github.api_url }}
+        run: |
+          curl -sS -X DELETE -H "authorization: Bearer $GH_TOKEN" \
+            "$API/repos/$REPO/issues/$NUMBER/labels/erp-ai:candidate" > /dev/null || true
+
+      # The label has just removed itself and the comment is minutes away — twelve of
+      # them on adempiere_patch, which publishes twenty-seven artifacts one after
+      # another. For that whole gap the pull request looks exactly as it would if the
+      # label had done nothing, which is what somebody watching it concludes.
+      #
+      # The platform says this about every other silence it produces and did not say
+      # it about its own: a label that quietly does nothing is indistinguishable from
+      # a label that is still working.
+      #
+      # Deleted once the real comment lands, so a thread keeps one comment per
+      # candidate rather than two. If the publish fails, or the service cannot be
+      # told, this stays — and then it is the record that something started and did
+      # not finish, which is the case that most needed a mark.
+      #
+      # Signed like everything else the platform writes. `ours()` reads that marker
+      # to keep the platform's words out of a person's, and a comment without it is
+      # read back as somebody's observation — as a verification's notes, or as a
+      # reviewer's objection.
+      - name: Say that it started, until it can say where it is
+        id: notice
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          SHA: ${{ steps.tree.outputs.sha }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          API: ${{ github.api_url }}
+        run: |
+          set -euo pipefail
+          jq -n --arg sha "${SHA:0:7}" --arg run "$RUN" '{body: (
+            "<!-- erp-ai:written-by-the-platform -->\n"
+            + "<!-- erp-ai:building -->\n"
+            + "### Construyendo el candidato desde `" + $sha + "`\n\n"
+            + "Publicar tarda entre uno y doce minutos según el repositorio, y la "
+            + "etiqueta ya se quitó sola para que puedas volver a aplicarla. Este "
+            + "aviso desaparece cuando llegue el comentario con la coordenada y qué "
+            + "probar.\n\n"
+            + "Si sigue aquí y no llegó nada, la construcción falló o no se pudo "
+            + "avisar: [la ejecución lo dice](" + $run + ").")}' > notice.json
+          id=$(curl -sS -X POST -H "authorization: Bearer $GH_TOKEN" \
+                 -H 'content-type: application/json' --data @notice.json \
+                 "$API/repos/$REPO/issues/$NUMBER/comments" | jq -r '.id // empty')
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Publish the candidate
+        id: publish
+        env:
+          # `pr<number>-<sha7>`. It cannot collide with a release tag, and it does not
+          # sort like one, so no version range resolves it by accident — it enters a
+          # deployment only because somebody typed it. It also says what it contains,
+          # which a guessed `1.4.7-rc1` does not: nobody has to decide the next
+          # release number at the moment a candidate is cut.
+          GITHUB_DEPLOY_USER: ${{ github.actor }}
+          GITHUB_DEPLOY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The same two credentials again, as Gradle project properties, because the
+          # repositories do not agree on how their publishing block reads them. Most
+          # read the environment; `withholding-engine` reads
+          # `findProperty("deployUsername")` and takes its repository URL the same
+          # way, deliberately — its build script refuses to default the URL, so that
+          # a job publishing to Sonatype cannot publish to GitHub Packages by
+          # accident. Handed only the environment, that build found no username, no
+          # password and no URL, and the candidate failed at the publish step.
+          #
+          # So the job says where it publishes, which is what that build script asks
+          # for. `ORG_GRADLE_PROJECT_x` is how Gradle reads `x` as a project
+          # property. Repositories reading the environment are unaffected: they never
+          # look these up.
+          ORG_GRADLE_PROJECT_deployUsername: ${{ github.actor }}
+          ORG_GRADLE_PROJECT_deployPassword: ${{ secrets.GITHUB_TOKEN }}
+          ORG_GRADLE_PROJECT_deployPublishUrl: https://maven.pkg.github.com/${{ github.repository }}
+          SHA: ${{ steps.tree.outputs.sha }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          version="pr${NUMBER}-${SHA:0:7}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # `publish` is not idempotent and the label is. A version is
+          # `pr<number>-<sha7>`, so labelling the same pull request again with no new
+          # commits asks GitHub Packages to overwrite a version that already exists,
+          # and it answers 409. The job then died here — before the coordinate,
+          # before the comment — so pressing the label a second time produced
+          # silence, which reads exactly like a label that does nothing.
+          #
+          # A 409 says the artifact is already there, built from this very commit:
+          # the sha is in the version, so the same version is the same code. That is
+          # a candidate. Report it rather than failing over having it already.
+          if ! out=$(ADEMPIERE_LIBRARY_VERSION="$version" ./gradlew publish 2>&1); then
+            printf '%s\n' "$out"
+            printf '%s' "$out" | grep -q 'status code 409' || exit 1
+            echo "::notice::$version was published from this commit already"
+          else
+            printf '%s\n' "$out"
+          fi
+
+          # The coordinate as published, read from the POM the build just generated
+          # rather than assembled from a convention. A repository's publication block
+          # sets its own groupId, and they are not all the same — one here publishes
+          # under `…adempiere.customizations` while the rest use `…adempiere.tools`.
+          # A coordinate somebody pastes has to be the real one; a plausible wrong one
+          # sends them looking for something that was never published.
+          #
+          # Every subproject's, not the root's. `find build/publications` looked only
+          # in the top-level build directory, so a multi-project repository reported
+          # its root aggregate — `com.erpya:adempiere_patch` — while what a consumer
+          # actually declares is `com.erpya:adempiere_patch.erpya_libs`. One
+          # publication is a coordinate; twenty-seven are a version, and calling one
+          # of them "the" coordinate is the same guess this block exists to stop.
+          #
+          # groupId and artifactId are read from above <dependencies>, where a
+          # project's own live. They come first in every POM Gradle writes here, so
+          # this changes no answer today and stops depending on that staying true.
+          coords=$(find . -path '*/build/publications/*' -name 'pom-default.xml' \
+                   | sort | while read -r pom; do
+            own=$(sed -n '1,/<dependencies>/p' "$pom")
+            g=$(printf '%s' "$own" | sed -n 's:.*<groupId>\(.*\)</groupId>.*:\1:p' | head -1)
+            a=$(printf '%s' "$own" | sed -n 's:.*<artifactId>\(.*\)</artifactId>.*:\1:p' | head -1)
+            [ -n "$g" ] && [ -n "$a" ] && printf '%s:%s:%s\n' "$g" "$a" "$version"
+          done)
+          n=$(printf '%s' "$coords" | grep -c . || true)
+          if [ "$n" = 1 ]; then
+            echo "coordinate=$coords" >> "$GITHUB_OUTPUT"
+          elif [ "$n" -gt 1 ]; then
+            { echo 'coordinates<<ERPAI_EOF'; printf '%s\n' "$coords"
+              echo 'ERPAI_EOF'; } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Say where it is and what to check
+        env:
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          VERSION: ${{ steps.publish.outputs.version }}
+          COORDINATE: ${{ steps.publish.outputs.coordinate }}
+          COORDINATES: ${{ steps.publish.outputs.coordinates }}
+          SHA: ${{ steps.tree.outputs.sha }}
+          SERVICE: ${{ secrets.ERP_AI_URL }}
+          SERVICE_TOKEN: ${{ secrets.ERP_AI_TOKEN }}
+          NOTICE: ${{ steps.notice.outputs.id }}
+          GH_TOKEN: ${{ github.token }}
+          API: ${{ github.api_url }}
+        run: |
+          set -euo pipefail
+          # The service is the only reader of this, and a POST it never received is
+          # a candidate, a merge or a verification that happened and that nobody was
+          # told about. `curl -sS` reports success on a 502: it made the request and
+          # got an answer, and the answer being "the service is down" is not
+          # something curl treats as its problem.
+          #
+          # erpya/material-management-improvements#6 is what that looks like. The
+          # library published as `pr6-80f3f6e`, the service was restarting, the POST
+          # came back 502, the run went green, and the pull request sat there with a
+          # candidate on a registry that nobody had been told existed.
+          #
+          # So: a 5xx or a dropped connection is retried, because the service
+          # restarts on every deploy and that is a second, not a failure. Anything
+          # else, and a retry that runs out, turns the run red — the candidate is
+          # already published by then, and a red run is the only thing left that can
+          # say so.
+          say() {
+            local path="$1" attempt=0 code
+            while : ; do
+              code=$(curl -sS -o response.json -w '%{http_code}' -X POST \
+                       "$SERVICE$path" \
+                       -H "Authorization: Bearer $SERVICE_TOKEN" \
+                       -H 'content-type: application/json' \
+                       --data @payload.json) || code=000
+              cat response.json 2>/dev/null || true
+              echo
+              case "$code" in
+                2*) return 0 ;;
+                000|429|5*) ;;
+                *) echo "::error::$path answered $code"; return 1 ;;
+              esac
+              attempt=$((attempt + 1))
+              if [ "$attempt" -ge 5 ]; then
+                echo "::error::$path answered $code, $attempt times"
+                return 1
+              fi
+              sleep $((attempt * 10))
+            done
+          }
+
+          # The service writes the comment rather than this workflow, because what to
+          # check lives in the analysis and the analysis lives there.
+          jq -n --arg repo "$REPO" --argjson num "$NUMBER" \
+                --arg version "$VERSION" --arg sha "$SHA" --arg coord "$COORDINATE" \
+                --arg coords "$COORDINATES" \
+             '{repository: $repo, pull_number: $num, version: $version, sha: $sha}
+              + (if $coord  == "" then {} else {coordinate: $coord} end)
+              + (if $coords == "" then {} else
+                 {coordinates: ($coords | split("\n") | map(select(length > 0)))} end)' \
+            > payload.json
+          say /candidate
+
+          # The notice has been replaced by the thing it stood in for. Left alone it
+          # would double every candidate thread; removed before the POST it would
+          # leave nothing behind in the one case where the POST is what failed.
+          if [ -n "${NOTICE:-}" ]; then
+            curl -sS -X DELETE -H "authorization: Bearer $GH_TOKEN" \
+              "$API/repos/$REPO/issues/comments/$NOTICE" > /dev/null || true
+          fi
+
+  # A merge is not a label, and it is the only event here nobody applies on purpose.
+  # Publishing was already automatic — `publish.yml` fires on a release and takes the
+  # tag verbatim as the version — but cutting the release was by hand, so an issue
+  # could only ever be closed as "merged", which is not something a reporter can
+  # install.
+  #
+  # This job says only that it landed. What the next version is called is read from
+  # the repository's marker and the release before it, by the service, because a
+  # version published under a guessed name cannot be taken back. See
+  # organization/DR-0005.
+  merged:
+    if: >-
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Say that it landed
+        env:
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          SERVICE: ${{ secrets.ERP_AI_URL }}
+          SERVICE_TOKEN: ${{ secrets.ERP_AI_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The service is the only reader of this, and a POST it never received is
+          # a candidate, a merge or a verification that happened and that nobody was
+          # told about. `curl -sS` reports success on a 502: it made the request and
+          # got an answer, and the answer being "the service is down" is not
+          # something curl treats as its problem.
+          #
+          # erpya/material-management-improvements#6 is what that looks like. The
+          # library published as `pr6-80f3f6e`, the service was restarting, the POST
+          # came back 502, the run went green, and the pull request sat there with a
+          # candidate on a registry that nobody had been told existed.
+          #
+          # So: a 5xx or a dropped connection is retried, because the service
+          # restarts on every deploy and that is a second, not a failure. Anything
+          # else, and a retry that runs out, turns the run red — the candidate is
+          # already published by then, and a red run is the only thing left that can
+          # say so.
+          say() {
+            local path="$1" attempt=0 code
+            while : ; do
+              code=$(curl -sS -o response.json -w '%{http_code}' -X POST \
+                       "$SERVICE$path" \
+                       -H "Authorization: Bearer $SERVICE_TOKEN" \
+                       -H 'content-type: application/json' \
+                       --data @payload.json) || code=000
+              cat response.json 2>/dev/null || true
+              echo
+              case "$code" in
+                2*) return 0 ;;
+                000|429|5*) ;;
+                *) echo "::error::$path answered $code"; return 1 ;;
+              esac
+              attempt=$((attempt + 1))
+              if [ "$attempt" -ge 5 ]; then
+                echo "::error::$path answered $code, $attempt times"
+                return 1
+              fi
+              sleep $((attempt * 10))
+            done
+          }
+
+          jq -n --arg repo "$REPO" --argjson num "$NUMBER" \
+             '{repository: $repo, pull_number: $num}' > payload.json
+          say /merged
+
+  # This label does not remove itself, and the difference is the point. `candidate`
+  # and the review labels are instructions — *do this now* — so they come off once
+  # done. `verified` is a state: it says this change has been run by a person and
+  # found to do what was asked, and that stays true until the change moves.
+  verified:
+    if: github.event.label.name == 'erp-ai:verified'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Record who verified it
+        env:
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          # Whoever applied the label. A verification with nobody's name on it is a
+          # rumour, and this is the one claim in the whole route that rests on a
+          # person rather than on a check.
+          WHO: ${{ github.event.sender.login }}
+          SERVICE: ${{ secrets.ERP_AI_URL }}
+          SERVICE_TOKEN: ${{ secrets.ERP_AI_TOKEN }}
+        run: |
+          set -euo pipefail
+          # The service is the only reader of this, and a POST it never received is
+          # a candidate, a merge or a verification that happened and that nobody was
+          # told about. `curl -sS` reports success on a 502: it made the request and
+          # got an answer, and the answer being "the service is down" is not
+          # something curl treats as its problem.
+          #
+          # erpya/material-management-improvements#6 is what that looks like. The
+          # library published as `pr6-80f3f6e`, the service was restarting, the POST
+          # came back 502, the run went green, and the pull request sat there with a
+          # candidate on a registry that nobody had been told existed.
+          #
+          # So: a 5xx or a dropped connection is retried, because the service
+          # restarts on every deploy and that is a second, not a failure. Anything
+          # else, and a retry that runs out, turns the run red — the candidate is
+          # already published by then, and a red run is the only thing left that can
+          # say so.
+          say() {
+            local path="$1" attempt=0 code
+            while : ; do
+              code=$(curl -sS -o response.json -w '%{http_code}' -X POST \
+                       "$SERVICE$path" \
+                       -H "Authorization: Bearer $SERVICE_TOKEN" \
+                       -H 'content-type: application/json' \
+                       --data @payload.json) || code=000
+              cat response.json 2>/dev/null || true
+              echo
+              case "$code" in
+                2*) return 0 ;;
+                000|429|5*) ;;
+                *) echo "::error::$path answered $code"; return 1 ;;
+              esac
+              attempt=$((attempt + 1))
+              if [ "$attempt" -ge 5 ]; then
+                echo "::error::$path answered $code, $attempt times"
+                return 1
+              fi
+              sleep $((attempt * 10))
+            done
+          }
+
+          jq -n --arg repo "$REPO" --argjson num "$NUMBER" --arg by "$WHO" \
+             '{repository: $repo, pull_number: $num, by: $by}' > payload.json
+          say /verified
